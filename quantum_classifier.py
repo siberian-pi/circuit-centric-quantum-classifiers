@@ -2,14 +2,14 @@
 根据circuit centric quantum classifier论文实现
 的quantum_classifier
 
-@jjq，2018.08.02
+@jjq, 2018.08.02, clouds.qin@gmail.com
 
 """
-
-
 import math
 import numpy as np
 import random
+import struct
+import time
 
 cos=math.cos
 sin=math.sin
@@ -25,8 +25,12 @@ def gcd(n,r):
         return n
     n=n-int(n/r)*r
     return gcd(r,n)
-    
 
+def get_time():
+    ti=time.localtime()
+    print('time: ',time.time(),', ',ti[3],'时',ti[4],'分',ti[5],'秒, ',ti[0],'年',ti[1],'月',ti[2],'日')
+    
+    
 
 class Quantum_Classifier:
     #属性
@@ -37,7 +41,7 @@ class Quantum_Classifier:
     circuit_size=0#整数。门的数目
     quantum_circuit_list=[]#数组，按顺序存放[门种类，[位置]，[参数]]
     bias=0
-
+    update_times=0
     #方法
     #定义电路,直接通过quantum_circuit_list定义；或者使用u,cp定义
     #python不支持函数重载...使用默认值
@@ -76,8 +80,8 @@ class Quantum_Classifier:
         return
     
     def init_state(self,some_state):
-        some_state[0]*=(1+0j)#把类型变为复数
-        self.initial_state=np.array(some_state)
+        #把类型变为复数
+        self.initial_state=np.array(some_state)*(1+0j)
         self.state=self.initial_state.copy()
         return
     
@@ -94,25 +98,29 @@ class Quantum_Classifier:
             print("error.circuit已存在!")
         n=self.qubit_number
         for i in range(n):
-            self.quantum_circuit_list.append(['u',[i],[rand(),rand(),rand()]])
-
+            self.quantum_circuit_list.append(['u',[i],[rand(),rand(),rand(),rand()]])
+        
         self.quantum_circuit_list.append(['cp',[0,n-1],[rand()]])
-        self.quantum_circuit_list.append(['u',[n-1],[rand(),rand(),rand()]])
+        self.quantum_circuit_list.append(['u',[n-1],[rand(),rand(),rand(),rand()]])
 
-        for i in range(self.qubit_number-1)[::-1]:
+        self.circuit_size+=n+2
+        
+        for i in range(n-1)[::-1]:
             self.quantum_circuit_list.append(['cp',[i,i-1],[rand()]])
-            self.quantum_circuit_list.append(['u',[i],[rand(),rand(),rand()]])
+            self.quantum_circuit_list.append(['u',[i],[rand(),rand(),rand(),rand()]])
+            self.circuit_size+=2
             
-        for i in range(self.qubit_number):
-            self.quantum_circuit_list.append(['u',[i],[rand(),rand(),rand()]])
-
+        for i in range(n):
+            self.quantum_circuit_list.append(['u',[i],[rand(),rand(),rand(),rand()]])
+        self.circuit_size+=n
         m=gcd(n,r)
         for j in range(int(n/m)):
             self.quantum_circuit_list.append(['cp',[(j*r-r)%n,(j*r)%n],[rand()]])
-            self.quantum_circuit_list.append(['u',[(j*r-r)%n],[rand(),rand(),rand()]])
-
-        self.quantum_circuit_list.append(['u',[0],[rand(),rand(),rand()]])
-        self.bias=rand()    
+            self.quantum_circuit_list.append(['u',[(j*r-r)%n],[rand(),rand(),rand(),rand()]])
+            self.circuit_size+=2
+        self.quantum_circuit_list.append(['u',[0],[rand(),rand(),rand(),rand()]])
+        self.bias=rand()
+        self.circuit_size+=1
             
     def init_circuit_by_circuit(circuit):
         self.quantum_circuit_list=circuit
@@ -146,13 +154,23 @@ class Quantum_Classifier:
             return '1'
         else:
             return '0'
-    def measure(self,index,repeat_times):
+    def measure_true(self,index,repeat_times):
         count=0
         for i in range(repeat_times):
             if(self.measure_position(index)=='0'):
                 count+=1
         return {'0':count,'1':repeat_times-count}
-            
+
+    def measure_fake(self,index,repeat_times):
+        self.swap(0,index)
+        sum1=sum([ x.real**2+x.imag**2 for x in self.state[:int(self.state_number/2)]])
+        sum2=sum([ x.real**2+x.imag**2 for x in self.state[int(self.state_number/2):]])
+        self.swap(0,index)
+        return {'0':sum1/(sum1+sum2)*repeat_times,'1':sum2/(sum1+sum2)*repeat_times}
+
+    def measure(self,index,repeat_times):
+        return self.measure_fake(index,repeat_times)
+    
     #辅助计算。改进，类似快速幂运算？
     def swap(self,position1,position2):#从0开始
         if(position1==position2):
@@ -191,7 +209,8 @@ class Quantum_Classifier:
         self.state[:m]=a*temp[:m]+b*temp[m:]
         self.state[m:]=c*temp[:m]+d*temp[m:]
         return
-
+    
+            
     #测试用
     def get_amplitude(self,basis):
         return (self.state[basis])
@@ -215,6 +234,13 @@ class Quantum_Classifier:
             self.swap(0,position)
             self.compute_u(phi,alpha,beta,gamma)
             self.swap(0,position)
+        if(gate_info[0]=='cu'):
+            [control,target]=gate_info[1]
+            phi,alpha,beta,gamma=gate_info[2]
+            self.swap(0,control)
+            self.compute_cu(phi,alpha,beta,gamma,target)
+            self.swap(0,control)
+            
         return
             
     #反向传播
@@ -238,11 +264,17 @@ class Quantum_Classifier:
         train_data=[]
         
         #初始化电路，qubit_number
+        self.init_qnum(10)   
         if(self.quantum_circuit_list==[]):
             print("根据标准方式初始化circuit")
             self.init_circuit()
-        self.init_qnum(10)    
-
+         
+        ######################################################################
+        ############## 小样本测试 ###########################################
+        print('img_num ',img_num)
+        print("update_times: ",self.update_times)
+        get_time()
+        
         for i in range(img_num):
             
             label=struct.unpack_from('>1B',buf_label,index_label)[0]
@@ -256,15 +288,112 @@ class Quantum_Classifier:
             train_data.append([im,label])
             count+=1
             if(count==batch_size):
-                self.update(train_data,batch_size)
+                self.update(train_data)
+                self.update_times+=1
+                print("update_times: ",self.update_times)
+                get_time()
                 count=0
                 train_data=[]
+        binfile_train.close()
+        binfile_label.close()
         return
 
     def update(self,train_data):#采用10个qubit,im编码补全
-        pass
-
+        parameter_delta=np.zeros(self.circuit_size*4+1)#至多.第一个是b
         
+        for im,label in train_data:
+
+            index_parameter=0
+            index=0#gate的index
+            
+            temp=np.zeros(1024)
+            temp[:784]=im
+            self.init_state(temp)
+            self.execute()
+            output=self.measure(0,repeat_times)
+            probability=output['0']/(output['0']+output['1'])
+            parameter_delta[index_parameter]=probability-label#bias
+            index_parameter+=1
+
+            quantum_classifier_delta=Quantum_Classifier()
+            temp2=np.zeros(2048)
+            temp2[:1024]=math.sqrt(2)/2*temp
+            temp2[1024:]=math.sqrt(2)/2*temp
+            quantum_classifier_delta.init_state(temp2)
+            quantum_classifier_delta.init_qnum(11)#一个辅助位
+            quantum_classifier_delta.quantum_circuit_list=self.quantum_circuit_list.copy()
+            quantum_classifier_delta.quantum_circuit_list.append(['u',[0],[1.5*pi,pi/4,pi/2,pi/2]])#Hadamard gate
+    
+            
+            
+            
+            for gate_info in self.quantum_circuit_list:
+                if(gate_info[0]=='u'):
+                    phi,alpha,beta,gamma=gate_info[2]
+                    [position]=gate_info[1]                    
+                    #phi固定
+                    parameter_delta[index_parameter]=0
+                    index_parameter+=1
+                    #alpha
+                    gate_info_new=['cdu',[0,position],[phi,alpha,beta,gamma,phi,alpha+pi/2,beta,gamma]]
+                    quantum_classifier_delta.quantum_circuit_list[index]=gate_info_new    
+                    real_AB=quantum_classifier_delta.compute_real_AB()    
+                                                
+                    parameter_delta[index_parameter]=(2*real_AB*(probability-label))
+                    index_parameter+=1
+                    #quantum_classifier_delta.quantum_circuit_list[index]=gate_info#复原
+                    #beta
+                    gate_info_new=['cdu',[0,position],[phi,alpha,beta,gamma,phi,alpha,beta+pi/2,0]]
+                    quantum_classifier_delta.quantum_circuit_list[index]=gate_info_new 
+                    real_AB=quantum_classifier_delta.compute_real_AB()
+                    gate_info_new=['cdu',[0,position],[phi,alpha,beta,gamma,phi,alpha,beta+pi/2,pi]]
+                    quantum_classifier_delta.quantum_circuit_list[index]=gate_info_new 
+                    real_AB+=quantum_classifier_delta.compute_real_AB()
+                    parameter_delta[index_parameter]=(real_AB*(probability-label))
+                    index_parameter+=1
+                    #gamma
+                    gate_info_new=['cdu',[0,position],[phi,alpha,beta,gamma,phi,alpha,0,gamma+pi/2]]
+                    real_AB=quantum_classifier_delta.compute_real_AB()
+                    quantum_classifier_delta.quantum_circuit_list[index]=gate_info_new 
+                    gate_info_new=['cdu',[0,position],[phi,alpha,beta,gamma,phi,alpha,pi,gamma+pi/2]]
+                    quantum_classifier_delta.quantum_circuit_list[index]=gate_info_new 
+                    real_AB+=quantum_classifier_delta.compute_real_AB()
+                    parameter_delta[index_parameter]=(real_AB*(probability-label))
+                    index_parameter+=1
+                    quantum_classifier_delta.quantum_circuit_list[index]=gate_info#复原
+
+                if(gate_info[0]=='cp'):
+                    control,target=gate_info[1]
+                    [phi]=gate_info[2]
+                    
+                    gate_info_new=['cdp',[0,control,target],[phi,phi+pi/2]]
+                    quantum_classifier_delta.quantum_circuit_list[index]=gate_info_new 
+                    real_AB=quantum_classifier_delta.compute_real_AB()
+                    parameter_delta[index_parameter]=(2*real_AB*(probability-label))                    
+                    index_parameter+=1
+                index+=1
+
+        #更新参数
+        index_parameter=0
+        #更新bias
+        self.bias+=learning_rate*parameter_delta[index_parameter]
+        index_parameter+=1
+
+        gate_index=0
+        for gate_info in self.quantum_circuit_list:
+            index=0#每个门的参数个数
+            for para in gate_info[2]:
+                self.quantum_circuit_list[gate_index][2][index]+=learning_rate*parameter_delta[index_parameter]
+                index+=1
+                index_parameter+=1
+            gate_index+=1
+       
+        
+    def compute_real_AB(self):
+        self.execute()
+        output=self.measure(0,repeat_times)
+        real_AB=2*output['0']/(output['0']+output['1'])-1
+        return real_AB
         
     
         
@@ -273,7 +402,6 @@ class Quantum_Classifier:
 
     
 """
-测试
-swap
-compute H,cp,组合
+def compute_cdp
+def compute_cdu
 """
