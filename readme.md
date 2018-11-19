@@ -1,3 +1,6 @@
+Notes: This code does not work well. Just a test.
+
+
 2018.08.04
 
 The code is slow and costs nearly 3 minutes for each (im,label), where im is a 1024 dimension complex vector. The training set in MNIST has 60000 such pairs and the expected running time is roughly 100 days thus unbearable. 
