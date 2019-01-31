@@ -13,7 +13,7 @@ Tips:
 2.For the limit of computation resource, in this code, function 'measure' using 'measure_fake', who gets the repeated measurement outcome by directly calculating the ratio of amplitutes, times the repeat_times. One can modify function 'measure' by using function 'measure_true', which simulates the random behaviour of quantum measurement but need expensive calculation( times repeated_times).   
 
 
-# 2018.08.04
+## 2018.08.04
 
 The code is slow and costs nearly 3 minutes for each (im,label), where im is a 1024 dimension complex vector. The training set in MNIST has 60000 such pairs and the expected running time is roughly 100 days thus unbearable. 
 
